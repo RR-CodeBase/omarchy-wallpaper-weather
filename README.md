@@ -329,9 +329,20 @@ fireflies.
 
 ## Requirements
 
-Omarchy 4.x (Quattro) with its Quickshell-based shell, plus `jq`. `curl` is only
-needed for `wallpaper-weather sync`. Qt's `QtQuick.Particles`, `QtQuick.Effects` and
-`QtQuick.Shapes` modules ship with `qt6-declarative`.
+Omarchy 4.x (Quattro), with its Quickshell-based shell.
+
+| | |
+|---|---|
+| `jq` | required — the CLI reads and writes its state with it |
+| `python3` | required for `sky auto` — the wallpaper detector is a stdlib-only script |
+| ImageMagick (`magick`) | required for `sky auto` — it samples the wallpaper |
+| `curl` | only for `wallpaper-weather sync` and `follow-weather` |
+
+Everything else is already there: `QtQuick.Particles`, `QtQuick.Effects` and
+`QtQuick.Shapes` ship with `qt6-declarative`.
+
+Without `python3` or ImageMagick the plugin still runs — you lose automatic
+wallpaper fitting and place the sky by hand with `wallpaper-weather sky`.
 
 ## Licence
 

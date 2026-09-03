@@ -243,11 +243,17 @@ save_profile() {
   write_state ".skyProfiles[\"$bg\"] = .sky"
 }
 
+# Detection is optional: the plugin works without it, you just place the sky
+# by hand. Split from sky_auto so the automatic path can skip quietly while an
+# explicit `sky auto` still says why it cannot run.
+can_detect() {
+  [[ -x $DETECT ]] && command -v magick >/dev/null && command -v python3 >/dev/null
+}
+
 sky_auto() {
   local bg; bg=$(current_bg)
   [[ -n $bg ]] || die "no current background to read"
-  [[ -x $DETECT ]] || die "detect-sky helper is missing"
-  command -v magick >/dev/null || die "sky auto needs ImageMagick"
+  can_detect || die "sky auto needs python3 and ImageMagick"
   local detected
   detected=$("$DETECT" "$bg") || die "could not read $bg"
   jq -e . <<<"$detected" >/dev/null 2>&1 || die "detector returned nonsense"
@@ -263,9 +269,11 @@ sky_recall() {
   saved=$(read_state | jq -c --arg bg "$bg" '.skyProfiles[$bg] // empty')
   if [[ -n $saved ]]; then
     write_state ".sky = $saved"
-  else
+  elif can_detect; then
     sky_auto
   fi
+  # No profile and nothing to measure with: leave the placement as it is rather
+  # than failing on every wallpaper change.
 }
 
 sky_show() {
