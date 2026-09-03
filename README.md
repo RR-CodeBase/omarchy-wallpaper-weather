@@ -244,13 +244,23 @@ wallpaper-weather sky recall        # re-apply this wallpaper's saved placement
 wallpaper-weather sky forget        # drop it and re-measure next time
 ```
 
-How it decides: the horizon is the sharpest sustained fall in row brightness
-top-down, since sky is nearly always brighter than what is under it; `skyLeft`
-is where the sky band stops being dark, so stars are not drawn inside a
-building; and the disc goes in the brightest patch, biased upward because the
-brightest sky is usually the glow just above the skyline, which is exactly where
-a moon should not sit. On the wallpaper the defaults were hand-tuned for, it
-measures a horizon of 0.333 against the 0.34 chosen by eye.
+How it decides:
+
+* **Horizon** — the sharpest sustained fall in row brightness top-down, since
+  sky is nearly always brighter than what is under it.
+* **skyLeft** — where the sky band stops being dark, so stars are not drawn
+  inside a building.
+* **Sun and moon** — the brightest patch, biased upward, because the brightest
+  sky is usually the glow just above the skyline, which is exactly where a disc
+  should not sit.
+* **Fog** — the band that is both washed out *and* bright. Low contrast alone
+  finds silhouettes as readily as haze, and putting the fog in a black rooftop
+  reads as a smear; haze pulls detail toward the sky's brightness, a silhouette
+  loses it by going dark.
+
+On the wallpaper the defaults were hand-tuned for, it measures a horizon of
+0.333 against the 0.34 chosen by eye, and puts the fog on the mid-ground city
+rather than the foreground roofs.
 
 Everything is overridable, and every value is a fraction of the screen:
 

@@ -25,6 +25,12 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  // The bar is transparent on many setups, so bar.barForeground is chosen to
+  // contrast with the WALLPAPER. That is right for the icon sitting on it and
+  // wrong for anything inside the popup, which sits on Color.popups.background
+  // -- pick the wrong one and the labels disappear on half the themes.
+  readonly property color panelText: Color.popups.text
+
   readonly property string cli:
     Qt.resolvedUrl("bin/wallpaper-weather").toString().replace(/^file:\/\//, "")
 
@@ -149,7 +155,7 @@ Panel {
 
         PanelSectionHeader {
           text: root.moodName
-          foreground: root.barForeground
+          foreground: root.panelText
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
         }
 
@@ -177,8 +183,8 @@ Panel {
               id: rowIcon
               text: modelData.glyph
               textFormat: Text.PlainText
-              color: parent.on ? Color.accent : root.barForeground
-              opacity: !parent.usable ? 0.3 : (parent.on ? 1.0 : 0.55)
+              color: parent.on ? Color.accent : root.panelText
+              opacity: !parent.usable ? 0.45 : (parent.on ? 1.0 : 0.78)
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.icon
               anchors.left: parent.left
@@ -188,8 +194,8 @@ Panel {
             Text {
               text: modelData.label
               textFormat: Text.PlainText
-              color: root.barForeground
-              opacity: !parent.usable ? 0.35 : (parent.on ? 1.0 : 0.7)
+              color: root.panelText
+              opacity: !parent.usable ? 0.5 : (parent.on ? 1.0 : 0.85)
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.body
               anchors.left: rowIcon.right
@@ -201,7 +207,7 @@ Panel {
               checked: parent.on
               interactive: parent.usable
               opacity: parent.usable ? 1.0 : 0.4
-              foreground: root.barForeground
+              foreground: root.panelText
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               onToggled: root.run(modelData.key)
@@ -211,12 +217,12 @@ Panel {
 
         PanelSeparator {
           width: panelColumn.width
-          foreground: root.barForeground
+          foreground: root.panelText
         }
 
         PanelSectionHeader {
           text: "Intensity  " + root.intensity.toFixed(1)
-          foreground: root.barForeground
+          foreground: root.panelText
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
         }
 
@@ -233,7 +239,7 @@ Panel {
 
         PanelSectionHeader {
           text: "Wind  " + root.wind.toFixed(2)
-          foreground: root.barForeground
+          foreground: root.panelText
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
         }
 
@@ -250,12 +256,12 @@ Panel {
 
         PanelSeparator {
           width: panelColumn.width
-          foreground: root.barForeground
+          foreground: root.panelText
         }
 
         PanelSectionHeader {
           text: "Automatic"
-          foreground: root.barForeground
+          foreground: root.panelText
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
         }
 
@@ -280,8 +286,8 @@ Panel {
               id: modeIcon
               text: modelData.glyph
               textFormat: Text.PlainText
-              color: parent.on ? Color.accent : root.barForeground
-              opacity: parent.on ? 1.0 : 0.55
+              color: parent.on ? Color.accent : root.panelText
+              opacity: parent.on ? 1.0 : 0.858
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.icon
               anchors.left: parent.left
@@ -291,8 +297,8 @@ Panel {
             Text {
               text: modelData.label
               textFormat: Text.PlainText
-              color: root.barForeground
-              opacity: parent.on ? 1.0 : 0.7
+              color: root.panelText
+              opacity: parent.on ? 1.0 : 0.85
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.body
               anchors.left: modeIcon.right
@@ -302,7 +308,7 @@ Panel {
 
             ToggleSwitch {
               checked: parent.on
-              foreground: root.barForeground
+              foreground: root.panelText
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               onToggled: root.run(modelData.cmd)
@@ -312,12 +318,12 @@ Panel {
 
         PanelSeparator {
           width: panelColumn.width
-          foreground: root.barForeground
+          foreground: root.panelText
         }
 
         PanelSectionHeader {
           text: "Presets"
-          foreground: root.barForeground
+          foreground: root.panelText
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
         }
 
@@ -345,7 +351,7 @@ Panel {
               text: modelData.label
               tooltipText: modelData.tip
               bordered: true
-              foreground: root.barForeground
+              foreground: root.panelText
               accent: Color.accent
               fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
               onClicked: { root.run(modelData.cmd); root.close() }

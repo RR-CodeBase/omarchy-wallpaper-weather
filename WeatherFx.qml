@@ -32,6 +32,8 @@ Item {
   readonly property real horizon: st ? st.horizon : 0.34
   readonly property real skyLeft: st ? st.skyLeft : 0.16
   readonly property real groundLevel: st ? st.groundLevel : 0.42
+  readonly property real mistY: st ? st.mistY : 0.30
+  readonly property real mistBand: st ? st.mistHeight : 0.34
   readonly property real discX: st ? (dayOn ? st.sunX : st.moonX) : 0.60
   readonly property real discY: st ? (dayOn ? st.sunY : st.moonY) : 0.14
   readonly property real discSize: st ? (dayOn ? st.sunSize : st.moonSize) : 0.95
@@ -296,10 +298,10 @@ Item {
       smooth: true
       readonly property int tile: Math.max(600, Math.round(fx.width * 0.85))
       sourceSize.width: tile
-      sourceSize.height: Math.max(1, Math.round(fx.height * fx.horizon))
+      sourceSize.height: Math.max(1, Math.round(fx.height * fx.mistBand))
       width: fx.width + tile
-      height: Math.round(fx.height * fx.horizon)
-      y: fx.height * fx.horizon * 0.9
+      height: Math.round(fx.height * fx.mistBand)
+      y: fx.height * fx.mistY
       opacity: fx.rainOn ? 0.16 : 0.09
       Behavior on opacity { NumberAnimation { duration: 1400 } }
       x: -tile

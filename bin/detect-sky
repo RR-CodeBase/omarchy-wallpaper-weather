@@ -107,6 +107,79 @@ def find_sky_left(grid, horizon_row):
     return 0.0
 
 
+def row_contrast(grid):
+    """Spread of luminance across each row.
+
+    Haze is exactly the loss of this: distance washes detail out and pulls
+    everything toward the sky's brightness, so a hazy band reads as a run of
+    rows with unusually little variation across them.
+    """
+    out = []
+    for row in grid:
+        mean = sum(row) / len(row)
+        var = sum((v - mean) ** 2 for v in row) / len(row)
+        out.append(var ** 0.5)
+    return out
+
+
+def find_mist_band(grid, horizon_row):
+    """The hazy band under the horizon: where the far mist layer belongs.
+
+    Low contrast alone is not haze -- a black rooftop silhouette is flat too,
+    and picking it puts the fog in the foreground where it reads as smeared
+    dirt. What separates them is brightness: haze washes detail out *and* pulls
+    what is left toward the sky's own brightness, while a silhouette loses
+    detail by going dark.
+
+    So score each row on both, and take the longest run that scores well.
+    Returns (top, height) as fractions.
+    """
+    contrast = row_contrast(grid)
+    means = row_means(grid)
+    lo = max(1, int(horizon_row))
+    hi = min(ROWS - 1, int(ROWS * 0.88))
+    fallback = (horizon_row / ROWS * 0.95, max(0.10, horizon_row / ROWS))
+    if hi - lo < 3:
+        return fallback
+
+    sky = sum(means[:max(1, lo)]) / max(1, lo)
+    if sky <= 0.01:
+        return fallback
+
+    span = max(contrast[lo:hi]) - min(contrast[lo:hi])
+    if span < 0.01:
+        return fallback
+    cmin = min(contrast[lo:hi])
+
+    scores = []
+    for y in range(lo, hi):
+        flat = 1.0 - (contrast[y] - cmin) / span          # 1 = featureless
+        lit = min(1.0, means[y] / sky)                    # 1 = as bright as sky
+        scores.append(flat * lit)
+
+    best_score = max(scores)
+    if best_score < 0.12:
+        return fallback
+
+    # Rows within 70% of the best count as part of the same band.
+    threshold = best_score * 0.7
+    runs, start_y = [], None
+    for i, sc in enumerate(scores):
+        if sc >= threshold:
+            if start_y is None:
+                start_y = i
+        elif start_y is not None:
+            runs.append((start_y, i - 1))
+            start_y = None
+    if start_y is not None:
+        runs.append((start_y, len(scores) - 1))
+    if not runs:
+        return fallback
+
+    top, bottom = max(runs, key=lambda r: r[1] - r[0])
+    return (top + lo) / ROWS, max(2, bottom - top + 1) / ROWS
+
+
 def find_disc(grid, horizon_row):
     """Brightest open patch of sky: where a sun or moon belongs.
 
@@ -152,6 +225,7 @@ def main():
     horizon_row = horizon * ROWS
     sky_left = find_sky_left(grid, horizon_row)
     disc_x, disc_y = find_disc(grid, horizon_row)
+    mist_y, mist_h = find_mist_band(grid, horizon_row)
 
     # Keep the disc clear of the horizon it was found near, and the ground well
     # below it, so mist and fireflies do not sit in the sky.
@@ -165,6 +239,8 @@ def main():
         "sunSize": 0.95,
         "moonSize": 0.52,
         "groundLevel": round(max(0.30, min(0.75, horizon + 0.08)), 3),
+        "mistY": round(max(0.0, min(0.85, mist_y)), 3),
+        "mistHeight": round(max(0.16, min(0.60, mist_h)), 3),
     }
 
     if debug:
@@ -174,6 +250,12 @@ def main():
             mark = "  <- horizon" if abs(y - horizon_row) < 1.5 else ""
             print(f"#  {y:3d} {means[y]:.3f} {bar}{mark}", file=sys.stderr)
         print(f"# confident horizon: {confident}", file=sys.stderr)
+        c = row_contrast(grid)
+        print("# row contrast (haze = low)", file=sys.stderr)
+        for y in range(0, ROWS, 3):
+            inband = mist_y * ROWS <= y < (mist_y + mist_h) * ROWS
+            print(f"#  {y:3d} {c[y]:.3f} {'#' * int(c[y] * 200)}"
+                  f"{'  <- fog' if inband else ''}", file=sys.stderr)
 
     print(json.dumps(sky))
     return 0

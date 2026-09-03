@@ -53,6 +53,10 @@ Item {
   property real horizon: 0.34
   property real skyLeft: 0.16
   property real groundLevel: 0.42
+  // Where the far haze actually sits, measured rather than guessed from the
+  // horizon -- the two are only the same on a picture with no depth to it.
+  property real mistY: 0.30
+  property real mistHeight: 0.34
 
   property bool bootstrapped: false
 
@@ -247,6 +251,8 @@ Item {
     horizon = frac_(sky.horizon, 0.34)
     skyLeft = frac_(sky.skyLeft, 0.16)
     groundLevel = frac_(sky.groundLevel, 0.42)
+    mistY = frac_(sky.mistY, 0.30)
+    mistHeight = Math.max(0.06, num_(sky.mistHeight, 0.34))
 
     bootstrapped = true
   }
@@ -259,7 +265,8 @@ Item {
       sky: {
         sunX: 0.60, sunY: 0.14, sunSize: 0.95,
         moonX: 0.60, moonY: 0.11, moonSize: 0.52,
-        horizon: 0.34, skyLeft: 0.16, groundLevel: 0.42
+        horizon: 0.34, skyLeft: 0.16, groundLevel: 0.42,
+        mistY: 0.30, mistHeight: 0.34
       }
     }, null, 2) + "\n"
   }
