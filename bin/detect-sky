@@ -34,6 +34,7 @@ def sample(path):
         capture_output=True, text=True, check=True).stdout
 
     grid = [[0.0] * COLS for _ in range(ROWS)]
+    rgb = [[(0.0, 0.0, 0.0)] * COLS for _ in range(ROWS)]
     for line in out.splitlines():
         if not line or line.startswith("#"):
             continue
@@ -54,7 +55,27 @@ def sample(path):
         if 0 <= x < COLS and 0 <= y < ROWS:
             # Rec.709 luma: green dominates perceived brightness.
             grid[y][x] = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    return grid
+            rgb[y][x] = (r, g, b)
+    return grid, rgb
+
+
+def band_colour(rgb, top_row, bottom_row):
+    """Average colour of a horizontal band, as #rrggbb.
+
+    Fog tinted with the picture's own haze sits in the image instead of on top
+    of it; white mist over a green city reads as a grey smear.
+    """
+    rows = [y for y in range(max(0, int(top_row)), min(ROWS, int(bottom_row) + 1))]
+    if not rows:
+        rows = [ROWS // 2]
+    n = len(rows) * COLS
+    r = sum(rgb[y][x][0] for y in rows for x in range(COLS)) / n
+    g = sum(rgb[y][x][1] for y in rows for x in range(COLS)) / n
+    b = sum(rgb[y][x][2] for y in rows for x in range(COLS)) / n
+    # Lift it toward white: haze is the scene seen through lit air, always
+    # paler than the scene itself.
+    r, g, b = (min(1.0, c * 0.45 + 0.55) for c in (r, g, b))
+    return "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in (r, g, b))
 
 
 def row_means(grid):
@@ -215,7 +236,7 @@ def main():
         return 2
 
     try:
-        grid = sample(args[0])
+        grid, rgb = sample(args[0])
     except (subprocess.CalledProcessError, FileNotFoundError) as error:
         print(f"detect-sky: could not read {args[0]}: {error}", file=sys.stderr)
         return 1
@@ -241,6 +262,7 @@ def main():
         "groundLevel": round(max(0.30, min(0.75, horizon + 0.08)), 3),
         "mistY": round(max(0.0, min(0.85, mist_y)), 3),
         "mistHeight": round(max(0.16, min(0.60, mist_h)), 3),
+        "hazeColor": band_colour(rgb, mist_y * ROWS, (mist_y + mist_h) * ROWS),
     }
 
     if debug:

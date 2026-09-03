@@ -106,6 +106,7 @@ the plugin otherwise. `omarchy plugin add` names it that way for you.
 | 󰖙 `day` | warm grade, sun disc, seven swaying god rays, drifting dust motes |
 | 󰖔 `night` | cool grade, moon, ninety twinkling stars, fireflies over the rooftops |
 | 󱐋 `thunder` | distant lightning behind the towers. A modifier on rain, not a mood — rain alone is just rain |
+| 󰖑 `fog` | haze on the band the picture already has, tinted with the colour sampled from it |
 
 Combinations are real states, not collisions. The colour grade **averages** the
 active moods rather than summing them, so `rain + day` lands on "overcast
@@ -256,7 +257,9 @@ How it decides:
 * **Fog** — the band that is both washed out *and* bright. Low contrast alone
   finds silhouettes as readily as haze, and putting the fog in a black rooftop
   reads as a smear; haze pulls detail toward the sky's brightness, a silhouette
-  loses it by going dark.
+  loses it by going dark. Its colour is sampled from that band and lifted
+  toward white, so the fog is the scene seen through lit air rather than white
+  smoke laid over it.
 
 On the wallpaper the defaults were hand-tuned for, it measures a horizon of
 0.333 against the 0.34 chosen by eye, and puts the fog on the mid-ground city

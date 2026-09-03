@@ -22,6 +22,8 @@ Item {
   readonly property bool dayOn: st ? st.dayOn : false
   readonly property bool nightOn: st ? st.nightOn : false
   readonly property bool thunderOn: st ? st.thunderOn : false
+  readonly property bool fogOn: st ? st.fogOn : false
+  readonly property color hazeColor: st ? st.hazeColor : "#9aa8a4"
   readonly property real amount: st ? st.amount : 1.0
   readonly property real wind: st ? st.wind : 0.0
   readonly property bool grainOn: st ? (st.fxEnabled && st.grain) : false
@@ -287,12 +289,21 @@ Item {
     id: mist
     anchors.fill: parent
     visible: opacity > 0.001
-    opacity: fx.rainOn ? 1 : (fx.nightOn || fx.dayOn ? 0.45 : 0)
+    // Fog is its own toggle now. Rain still brings some haze with it, because
+    // rain without any is a sprite over a dry picture.
+    opacity: (fx.fogOn || fx.rainOn) ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 1400; easing.type: Easing.InOutCubic } }
 
     // far band -- sits on the city, drifts right
     Image {
       id: mistFar
+      // White mist over a coloured scene reads as a grey stripe; tinted
+      // with the picture's own haze it sits inside the image.
+      layer.enabled: mist.visible && width > 0 && height > 0
+      layer.effect: MultiEffect {
+        colorization: 1.0
+        colorizationColor: fx.hazeColor
+      }
       source: Qt.resolvedUrl("assets/mist.png")
       fillMode: Image.TileHorizontally
       smooth: true
@@ -302,7 +313,7 @@ Item {
       width: fx.width + tile
       height: Math.round(fx.height * fx.mistBand)
       y: fx.height * fx.mistY
-      opacity: fx.rainOn ? 0.16 : 0.09
+      opacity: fx.fogOn ? 0.34 : 0.15
       Behavior on opacity { NumberAnimation { duration: 1400 } }
       x: -tile
       NumberAnimation on x {
@@ -315,6 +326,13 @@ Item {
     // near band -- lower, larger, drifts left, so the two shear against each other
     Image {
       id: mistNear
+      // White mist over a coloured scene reads as a grey stripe; tinted
+      // with the picture's own haze it sits inside the image.
+      layer.enabled: mist.visible && width > 0 && height > 0
+      layer.effect: MultiEffect {
+        colorization: 1.0
+        colorizationColor: fx.hazeColor
+      }
       source: Qt.resolvedUrl("assets/mist.png")
       fillMode: Image.TileHorizontally
       smooth: true
@@ -324,7 +342,7 @@ Item {
       width: fx.width + tile
       height: Math.round(fx.height * fx.nearBand)
       y: fx.height * (fx.groundLevel + (1 - fx.groundLevel) * 0.17)
-      opacity: fx.rainOn ? 0.13 : 0.06
+      opacity: fx.fogOn ? 0.26 : 0.11
       Behavior on opacity { NumberAnimation { duration: 1400 } }
       x: 0
       NumberAnimation on x {

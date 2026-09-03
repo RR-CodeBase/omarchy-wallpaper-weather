@@ -22,7 +22,7 @@ WTTR_CACHE="$CACHE_DIR/wttr.json"
 WTTR_MAX_AGE=900 # seconds
 
 MOODS=(rain day night)
-MODIFIERS=(thunder)
+MODIFIERS=(thunder fog)
 FLAGS=(enabled drift parallax grain)
 MODES=(followSun followWeather)
 
@@ -32,6 +32,7 @@ DEFAULTS='{
   "day": false,
   "night": true,
   "thunder": false,
+  "fog": false,
   "intensity": 1.0,
   "wind": 0.0,
   "drift": true,
@@ -43,7 +44,8 @@ DEFAULTS='{
   "sky": {
     "sunX": 0.60, "sunY": 0.14, "sunSize": 0.95,
     "moonX": 0.60, "moonY": 0.11, "moonSize": 0.52,
-    "horizon": 0.34, "skyLeft": 0.16, "groundLevel": 0.42
+    "horizon": 0.34, "skyLeft": 0.16, "groundLevel": 0.42,
+    "mistY": 0.30, "mistHeight": 0.34, "hazeColor": "#9aa8a4"
   }
 }'
 
@@ -361,15 +363,15 @@ apply_follow_weather() {
 apply_preset() {
   case "$1" in
   clear | off | none)
-    write_state '.followSun=false | .followWeather=false | .rain=false | .thunder=false | .day=false | .night=false' ;;
+    write_state '.followSun=false | .followWeather=false | .fog=false | .rain=false | .thunder=false | .day=false | .night=false' ;;
   rain-only | shower)
-    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=false | .day=false | .night=false | .intensity=1.0 | .wind=0.15' ;;
+    write_state '.followSun=false | .followWeather=false | .fog=false | .rain=true | .thunder=false | .day=false | .night=false | .intensity=1.0 | .wind=0.15' ;;
   drizzle)
-    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=false | .day=false | .night=true | .intensity=0.45 | .wind=0.05' ;;
+    write_state '.followSun=false | .followWeather=false | .fog=true | .rain=true | .thunder=false | .day=false | .night=true | .intensity=0.45 | .wind=0.05' ;;
   storm)
-    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=true | .day=false | .night=true | .intensity=1.5 | .wind=0.55' ;;
+    write_state '.followSun=false | .followWeather=false | .fog=true | .rain=true | .thunder=true | .day=false | .night=true | .intensity=1.5 | .wind=0.55' ;;
   sunshower)
-    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=false | .day=true | .night=false | .intensity=0.7 | .wind=0.1' ;;
+    write_state '.followSun=false | .followWeather=false | .fog=false | .rain=true | .thunder=false | .day=true | .night=false | .intensity=0.7 | .wind=0.1' ;;
   noon | sunshine)
     write_state '.followSun=false | .followWeather=false | .rain=false | .day=true | .night=false | .intensity=1.0 | .wind=0' ;;
   goldenhour | golden)
@@ -397,6 +399,7 @@ Moods (independent toggles -- they stack):
   wallpaper-weather day  [on|off|toggle]  󰖙  sunlight, god rays, dust motes
   wallpaper-weather night [on|off|toggle] 󰖔  stars, moonlight, fireflies
   wallpaper-weather thunder [on|off|toggle]  lightning; needs rain to show
+  wallpaper-weather fog [on|off|toggle]      haze on the band the picture has
   wallpaper-weather mood <r> <d> <n>      set all three at once
   wallpaper-weather clear                 all moods off
   wallpaper-weather cycle                 step through the good combinations
@@ -452,10 +455,10 @@ status | "")
   usage
   ;;
 
-rain | day | night | thunder)
+rain | day | night | thunder | fog)
   value=$(resolve_bool "$cmd" "${1:-toggle}")
   case "$cmd" in
-  rain | thunder) write_state ".$cmd = $value | .followWeather = false" ;;
+  rain | thunder | fog) write_state ".$cmd = $value | .followWeather = false" ;;
   day | night) write_state ".$cmd = $value | .followSun = false" ;;
   esac
   ;;

@@ -70,6 +70,13 @@
       "action": "wallpaper-weather thunder",
       "checked": "test \"$(wallpaper-weather status --json | jq -r .thunder)\" = true"
   },
+  "wallpaper-weather.fog": {
+    "icon": "󰖑",
+    "label": "Fog",
+    "description": "Haze on the band the picture already has",
+    "action": "wallpaper-weather fog",
+    "checked": "test \"$(wallpaper-weather status --json | jq -r .fog)\" = true"
+  },
   "wallpaper-weather.follow-sun": {
       "icon": "󰖜",
       "label": "Follow The Sun",

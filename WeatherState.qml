@@ -23,6 +23,7 @@ Item {
   property bool day: false
   property bool night: false
   property bool thunder: false   // lightning; a storm, not plain rain
+  property bool fog: false       // haze on the band the picture already has
   property real intensity: 1.0   // 0.2 .. 2.0, scales particle counts
   property real wind: 0.0        // -1 .. 1, rain slant
   property bool drift: true      // slow ken-burns push on the photo
@@ -57,6 +58,9 @@ Item {
   // horizon -- the two are only the same on a picture with no depth to it.
   property real mistY: 0.30
   property real mistHeight: 0.34
+  // Sampled from the picture, so the haze is the scene seen through lit air
+  // rather than white smoke laid over it.
+  property color hazeColor: "#9aa8a4"
 
   property bool bootstrapped: false
 
@@ -66,6 +70,7 @@ Item {
   readonly property bool nightOn: fxEnabled && night
   // Thunder is a modifier on rain, not a mood of its own -- no rain, no storm.
   readonly property bool thunderOn: fxEnabled && rain && thunder
+  readonly property bool fogOn: fxEnabled && fog
   readonly property int moodCount: (rainOn ? 1 : 0) + (dayOn ? 1 : 0) + (nightOn ? 1 : 0)
   readonly property bool anyMood: moodCount > 0
   readonly property real amount: Math.max(0.2, Math.min(2.0, intensity))
@@ -235,6 +240,7 @@ Item {
     day = bool_(cfg.day, false)
     night = bool_(cfg.night, false)
     thunder = bool_(cfg.thunder, false)
+    fog = bool_(cfg.fog, false)
     drift = bool_(cfg.drift, true)
     parallax = bool_(cfg.parallax, true)
     grain = bool_(cfg.grain, true)
@@ -253,20 +259,21 @@ Item {
     groundLevel = frac_(sky.groundLevel, 0.42)
     mistY = frac_(sky.mistY, 0.30)
     mistHeight = Math.max(0.06, num_(sky.mistHeight, 0.34))
+    hazeColor = String(sky.hazeColor || "#9aa8a4")
 
     bootstrapped = true
   }
 
   function defaultsJson() {
     return JSON.stringify({
-      enabled: true, rain: false, day: false, night: true, thunder: false,
+      enabled: true, rain: false, day: false, night: true, thunder: false, fog: false,
       intensity: 1.0, wind: 0.0, drift: true, parallax: true, grain: true,
       followSun: false, followWeather: false,
       sky: {
         sunX: 0.60, sunY: 0.14, sunSize: 0.95,
         moonX: 0.60, moonY: 0.11, moonSize: 0.52,
         horizon: 0.34, skyLeft: 0.16, groundLevel: 0.42,
-        mistY: 0.30, mistHeight: 0.34
+        mistY: 0.30, mistHeight: 0.34, hazeColor: "#9aa8a4"
       }
     }, null, 2) + "\n"
   }
@@ -301,7 +308,7 @@ Item {
     function status(): string {
       return JSON.stringify({
         enabled: state.fxEnabled, rain: state.rain, day: state.day, night: state.night,
-        thunder: state.thunder,
+        thunder: state.thunder, fog: state.fog,
         intensity: state.intensity, wind: state.wind,
         drift: state.drift, parallax: state.parallax, grain: state.grain
       })

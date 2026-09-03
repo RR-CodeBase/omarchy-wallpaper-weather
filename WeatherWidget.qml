@@ -41,6 +41,7 @@ Panel {
   property real intensity: 1.0
   property real wind: 0.0
   property bool thunder: false
+  property bool fog: false
   property bool followSun: false
   property bool followWeather: false
 
@@ -109,6 +110,7 @@ Panel {
         var i = Number(cfg.intensity); if (isFinite(i)) root.intensity = i
         var w = Number(cfg.wind); if (isFinite(w)) root.wind = w
         root.thunder = cfg.thunder === true
+        root.fog = cfg.fog === true
         root.followSun = cfg.followSun === true
         root.followWeather = cfg.followWeather === true
       } catch (error) {
@@ -140,7 +142,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(640))
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(700))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -166,7 +168,8 @@ Panel {
             { key: "rain",  glyph: "󰖗", label: "Rain" },
             { key: "day",   glyph: "󰖙", label: "Sunshine" },
             { key: "night", glyph: "󰖔", label: "Night" },
-            { key: "thunder", glyph: "󱐋", label: "Thunder", needs: "rain" }
+            { key: "thunder", glyph: "󱐋", label: "Thunder", needs: "rain" },
+            { key: "fog",     glyph: "󰖑", label: "Fog" }
           ]
 
           Item {

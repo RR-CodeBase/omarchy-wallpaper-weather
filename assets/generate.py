@@ -155,8 +155,8 @@ def mist():
         u, v = x / w, y / h
         n = sum(sample(grid, u, v) * weight for grid, weight in octaves)
         n = smoothstep((n - 0.34) / 0.44)          # lift contrast into wisps
-        band = math.sin(math.pi * v) ** 1.5        # fade to nothing at both edges
-        return n * band * 0.9
+        band = math.sin(math.pi * v) ** 3.0        # dissolve at both edges
+        return n * band
 
     write_png("mist.png", w, h, alpha)
 
