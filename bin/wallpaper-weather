@@ -1,0 +1,576 @@
+#!/usr/bin/env bash
+#
+# wallpaper-weather -- drive the weather layer on the Osaka Jade Custom wallpaper.
+#
+# State lives in one JSON file. This script is the only writer; the shell
+# plugin (io.github.rr-codebase.wallpaper-weather) watches the file and re-renders. The IPC poke after
+# each write only skips the watcher's latency -- everything still works with
+# the shell restarted, the file hand-edited, or this script run over SSH.
+#
+#   wallpaper-weather                 show what's on
+#   wallpaper-weather rain            toggle rain
+#   wallpaper-weather night on        set explicitly
+#   wallpaper-weather storm           preset
+#   wallpaper-weather sync            match the real weather outside
+#
+set -euo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
+STATE="$STATE_DIR/wallpaper-weather.json"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/wallpaper-weather"
+WTTR_CACHE="$CACHE_DIR/wttr.json"
+WTTR_MAX_AGE=900 # seconds
+
+MOODS=(rain day night)
+MODIFIERS=(thunder)
+FLAGS=(enabled drift parallax grain)
+MODES=(followSun followWeather)
+
+DEFAULTS='{
+  "enabled": true,
+  "rain": false,
+  "day": false,
+  "night": true,
+  "thunder": false,
+  "intensity": 1.0,
+  "wind": 0.0,
+  "drift": true,
+  "parallax": true,
+  "grain": true,
+  "followSun": false,
+  "followWeather": false,
+  "skyProfiles": {},
+  "sky": {
+    "sunX": 0.60, "sunY": 0.14, "sunSize": 0.95,
+    "moonX": 0.60, "moonY": 0.11, "moonSize": 0.52,
+    "horizon": 0.34, "skyLeft": 0.16, "groundLevel": 0.42
+  }
+}'
+
+SKY_KEYS=(sunX sunY sunSize moonX moonY moonSize horizon skyLeft groundLevel)
+
+die() {
+  echo "wallpaper-weather: $*" >&2
+  exit 1
+}
+
+command -v jq >/dev/null || die "jq is required"
+
+# --------------------------------------------------------------------- state
+
+# Carried over from when this plugin was called osaka-jade-weather. Keeps a
+# rename from silently resetting someone's moods and sky placement.
+LEGACY_STATE="$STATE_DIR/weather-fx.json"
+
+ensure_state() {
+  mkdir -p "$STATE_DIR"
+  if [[ ! -e $STATE && -s $LEGACY_STATE ]]; then
+    mv -- "$LEGACY_STATE" "$STATE"
+  fi
+  if [[ ! -s $STATE ]] || ! jq -e . "$STATE" >/dev/null 2>&1; then
+    printf '%s\n' "$DEFAULTS" >"$STATE"
+  fi
+}
+
+read_state() {
+  ensure_state
+  # Merge over the defaults so a key added by a later version is never missing.
+  jq -n --argjson d "$DEFAULTS" --slurpfile s "$STATE" \
+    '($d + $s[0]) | .sky = ($d.sky + ($s[0].sky // {}))'
+}
+
+# write_state <jq-filter> -- applies the filter to the current state.
+write_state() {
+  local filter="$1" next tmp
+  next=$(read_state | jq "$filter")
+  jq -e . <<<"$next" >/dev/null || die "refusing to write malformed state"
+  tmp=$(mktemp "$STATE.XXXXXX")
+  printf '%s\n' "$next" >"$tmp"
+  mv -f "$tmp" "$STATE" # atomic: the shell never sees a half-written file
+  omarchy-shell -q wallpaper-weather reload 2>/dev/null || true
+}
+
+get() { read_state | jq -r --arg k "$1" '.[$k]'; }
+
+# --------------------------------------------------------------------- input
+
+# Resolve on|off|toggle|yes|no|1|0 against the current value.
+resolve_bool() {
+  local key="$1" word="${2:-toggle}" cur
+  cur=$(get "$key")
+  case "${word,,}" in
+  on | true | yes | 1 | enable | enabled) echo true ;;
+  off | false | no | 0 | disable | disabled) echo false ;;
+  toggle | "") [[ $cur == true ]] && echo false || echo true ;;
+  *) die "expected on|off|toggle, got '$word'" ;;
+  esac
+}
+
+# Accept an absolute number or a +/- delta, then clamp.
+resolve_number() {
+  local key="$1" word="$2" lo="$3" hi="$4" cur value
+  cur=$(get "$key")
+  [[ -n $word ]] || die "$key needs a value"
+  case "$word" in
+  +*) value=$(awk -v a="$cur" -v b="${word#+}" 'BEGIN{print a+b}') ;;
+  -*) value=$(awk -v a="$cur" -v b="${word#-}" 'BEGIN{print a-b}') ;;
+  *) value="$word" ;;
+  esac
+  [[ $value == *[0-9]* ]] || die "'$word' is not a number"
+  awk -v v="$value" -v lo="$lo" -v hi="$hi" \
+    'BEGIN{ if (v<lo) v=lo; if (v>hi) v=hi; printf "%.3g\n", v }'
+}
+
+is_mood() { [[ " ${MOODS[*]} " == *" $1 "* ]]; }
+is_flag() { [[ " ${FLAGS[*]} " == *" $1 "* ]]; }
+
+# ---------------------------------------------------------------- reporting
+
+glyph_for() {
+  case "$1" in
+  rain) printf '󰖗' ;;
+  day) printf '󰖙' ;;
+  night) printf '󰖔' ;;
+  *) printf '󰖨' ;;
+  esac
+}
+
+# One line naming the combination, because the combinations are the point.
+mood_label() {
+  local s r d n
+  s=$(read_state)
+  [[ $(jq -r .enabled <<<"$s") == true ]] || { echo "Disabled"; return; }
+  r=$(jq -r .rain <<<"$s"); d=$(jq -r .day <<<"$s"); n=$(jq -r .night <<<"$s")
+  case "$r$d$n" in
+  truetruetrue) echo "Everything At Once" ;;
+  truetruefalse) echo "Sun Shower" ;;
+  truefalsetrue) [[ $(jq -r .thunder <<<"$s") == true ]] && echo "Night Storm" || echo "Rain At Night" ;;
+  truefalsefalse) [[ $(jq -r .thunder <<<"$s") == true ]] && echo "Thunderstorm" || echo "Rain" ;;
+  falsetruetrue) echo "Golden Hour" ;;
+  falsetruefalse) echo "Sunshine" ;;
+  falsefalsetrue) echo "Night" ;;
+  *) echo "Clear" ;;
+  esac
+}
+
+
+status_human() {
+  local s
+  s=$(read_state)
+  local mark_on=" on" mark_off="off"
+  printf '  %-10s %s\n' "mood" "$(mood_label)"
+  echo
+  for k in "${MOODS[@]}"; do
+    local v; v=$(jq -r --arg k "$k" '.[$k]' <<<"$s")
+    printf '  %s %-9s %s\n' "$(glyph_for "$k")" "$k" \
+      "$([[ $v == true ]] && echo "$mark_on" || echo "$mark_off")"
+  done
+  echo
+  printf '  %-11s %s\n' "intensity" "$(jq -r .intensity <<<"$s")"
+  printf '  %-11s %s\n' "wind" "$(jq -r .wind <<<"$s")"
+  for k in "${FLAGS[@]}"; do
+    printf '  %-11s %s\n' "$k" "$(jq -r --arg k "$k" '.[$k]' <<<"$s")"
+  done
+}
+
+# -------------------------------------------------------------------- wttr
+
+fetch_wttr() {
+  mkdir -p "$CACHE_DIR"
+  if [[ -s $WTTR_CACHE ]]; then
+    local age=$(( $(date +%s) - $(stat -c %Y "$WTTR_CACHE") ))
+    (( age < WTTR_MAX_AGE )) && { cat "$WTTR_CACHE"; return; }
+  fi
+
+  # Reuse the location the Omarchy weather widget is already configured with.
+  local loc="" loc_state="$STATE_DIR/settings/weather.json"
+  if [[ -s $loc_state ]]; then
+    loc=$(jq -r '
+      if (.latitude // null) != null and (.longitude // null) != null
+      then "\(.latitude),\(.longitude)"
+      else (.name // "") end' "$loc_state" 2>/dev/null || true)
+    [[ $loc == "null" ]] && loc=""
+  fi
+
+  local body
+  if body=$(curl -fsS --max-time 12 "https://wttr.in/${loc}?format=j1" 2>/dev/null) &&
+    jq -e .current_condition <<<"$body" >/dev/null 2>&1; then
+    printf '%s\n' "$body" >"$WTTR_CACHE"
+    printf '%s\n' "$body"
+    return 0
+  fi
+  # Serve stale rather than nothing.
+  [[ -s $WTTR_CACHE ]] && { cat "$WTTR_CACHE"; return 0; }
+  return 1
+}
+
+# Local day/night from wttr's astronomy block, falling back to the clock.
+is_daytime() {
+  local report="${1:-}" sunrise sunset now
+  if [[ -n $report ]]; then
+    sunrise=$(jq -r '.weather[0].astronomy[0].sunrise // empty' <<<"$report")
+    sunset=$(jq -r '.weather[0].astronomy[0].sunset // empty' <<<"$report")
+  fi
+  if [[ -n ${sunrise:-} && -n ${sunset:-} ]]; then
+    now=$(date +%s)
+    local rise set
+    rise=$(date -d "today $sunrise" +%s 2>/dev/null || echo "")
+    set=$(date -d "today $sunset" +%s 2>/dev/null || echo "")
+    if [[ -n $rise && -n $set ]]; then
+      (( now >= rise && now < set )) && return 0 || return 1
+    fi
+  fi
+  local h; h=$(date +%-H)
+  (( h >= 7 && h < 19 ))
+}
+
+# ---------------------------------------------------------------------- sky
+
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+DETECT="$HERE/detect-sky"
+CURRENT_BG_LINK="$STATE_DIR/current/background"
+
+current_bg() { readlink -f "$CURRENT_BG_LINK" 2>/dev/null || true; }
+
+# Sky placement is a property of the picture, not of the session, so every
+# change is filed under the wallpaper it was made for and comes back when that
+# wallpaper does.
+save_profile() {
+  local bg; bg=$(current_bg)
+  [[ -n $bg ]] || return 0
+  write_state ".skyProfiles[\"$bg\"] = .sky"
+}
+
+sky_auto() {
+  local bg; bg=$(current_bg)
+  [[ -n $bg ]] || die "no current background to read"
+  [[ -x $DETECT ]] || die "detect-sky helper is missing"
+  command -v magick >/dev/null || die "sky auto needs ImageMagick"
+  local detected
+  detected=$("$DETECT" "$bg") || die "could not read $bg"
+  jq -e . <<<"$detected" >/dev/null 2>&1 || die "detector returned nonsense"
+  write_state ".sky = (.sky + $detected)"
+  save_profile
+}
+
+# Restore the placement filed for this wallpaper, measuring it the first time.
+sky_recall() {
+  local bg saved
+  bg=$(current_bg)
+  [[ -n $bg ]] || return 0
+  saved=$(read_state | jq -c --arg bg "$bg" '.skyProfiles[$bg] // empty')
+  if [[ -n $saved ]]; then
+    write_state ".sky = $saved"
+  else
+    sky_auto
+  fi
+}
+
+sky_show() {
+  local s; s=$(read_state | jq .sky)
+  printf '  %-12s %s, %s   size %s\n' "sun" \
+    "$(jq -r .sunX <<<"$s")" "$(jq -r .sunY <<<"$s")" "$(jq -r .sunSize <<<"$s")"
+  printf '  %-12s %s, %s   size %s\n' "moon" \
+    "$(jq -r .moonX <<<"$s")" "$(jq -r .moonY <<<"$s")" "$(jq -r .moonSize <<<"$s")"
+  printf '  %-12s %s\n' "horizon" "$(jq -r .horizon <<<"$s")"
+  printf '  %-12s %s\n' "skyLeft" "$(jq -r .skyLeft <<<"$s")"
+  printf '  %-12s %s\n' "groundLevel" "$(jq -r .groundLevel <<<"$s")"
+  echo
+  echo "  All values are fractions of the screen: 0,0 is top-left."
+}
+
+# Clamp to 0..1 -- these are screen fractions, and an out-of-range value puts
+# the effect somewhere nobody can see it.
+sky_frac() {
+  awk -v v="$1" 'BEGIN{ if (v+0 != v) exit 1; if (v<0) v=0; if (v>1) v=1; printf "%.4g\n", v }' \
+    || die "'$1' is not a number between 0 and 1"
+}
+
+sky_set() {
+  local what="${1:-}"; shift || true
+  case "$what" in
+  "" | show) sky_show ;;
+  auto) sky_auto; sky_show ;;
+  recall) sky_recall ;;
+  save) save_profile ;;
+  forget)
+    local bg; bg=$(current_bg)
+    [[ -n $bg ]] && write_state "del(.skyProfiles[\"$bg\"])"
+    ;;
+  sun | moon)
+    (( $# >= 2 )) || die "usage: wallpaper-weather sky $what <x> <y> [size]"
+    local x y size
+    x=$(sky_frac "$1"); y=$(sky_frac "$2")
+    local key="${what}"
+    if (( $# >= 3 )); then
+      size=$(awk -v v="$3" 'BEGIN{ if (v<0.05) v=0.05; if (v>3) v=3; printf "%.4g\n", v }')
+      write_state ".sky.${key}X=$x | .sky.${key}Y=$y | .sky.${key}Size=$size"
+      save_profile
+    else
+      write_state ".sky.${key}X=$x | .sky.${key}Y=$y"
+      save_profile
+    fi
+    ;;
+  horizon | skyLeft | groundLevel)
+    (( $# >= 1 )) || die "usage: wallpaper-weather sky $what <0..1>"
+    write_state ".sky.$what = $(sky_frac "$1")"
+    save_profile
+    ;;
+  reset)
+    write_state ".sky = $(jq -c .sky <<<"$DEFAULTS")"; save_profile ;;
+  *)
+    die "unknown sky setting '$what' (sun, moon, horizon, skyLeft, groundLevel, reset)" ;;
+  esac
+}
+
+# -------------------------------------------------------------------- modes
+
+# followSun owns day/night only.
+apply_follow_sun() {
+  if is_daytime "$(fetch_wttr 2>/dev/null || true)"; then
+    write_state '.day=true | .night=false'
+  else
+    write_state '.day=false | .night=true'
+  fi
+}
+
+# followWeather owns the wet fields, and day/night too when followSun is off --
+# a real forecast knows the sunrise as well as the rain.
+apply_follow_weather() {
+  local report
+  report=$(fetch_wttr) || return 1
+  local code desc gust wet heavy daylight windv intens
+  code=$(jq -r '.current_condition[0].weatherCode // "113"' <<<"$report")
+  gust=$(jq -r '.current_condition[0].WindGustKmph // .current_condition[0].windspeedKmph // "0"' <<<"$report")
+  wet=false; heavy=false
+  case "$code" in
+  176 | 179 | 182 | 185 | 200 | 263 | 266 | 281 | 284 | 293 | 296 | 299 | 302 | 305 | 308 | 311 | 314 | 317 | 320 | 323 | 326 | 329 | 332 | 335 | 338 | 350 | 353 | 356 | 359 | 362 | 365 | 368 | 371 | 374 | 377 | 386 | 389 | 392 | 395)
+    wet=true ;;
+  esac
+  case "$code" in 200 | 386 | 389 | 392 | 395) heavy=true ;; esac
+  windv=$(awk -v g="$gust" 'BEGIN{ v=g/60; if (v>1) v=1; printf "%.2f", v }')
+  intens=1.0; [[ $heavy == true ]] && intens=1.5
+
+  if is_daytime "$report"; then daylight=true; else daylight=false; fi
+  write_state ".rain=$wet | .thunder=$heavy | .wind=$windv | .intensity=$intens \
+    | .day=$daylight | .night=$([[ $daylight == true ]] && echo false || echo true)"
+}
+
+# ------------------------------------------------------------------ presets
+
+apply_preset() {
+  case "$1" in
+  clear | off | none)
+    write_state '.followSun=false | .followWeather=false | .rain=false | .thunder=false | .day=false | .night=false' ;;
+  rain-only | shower)
+    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=false | .day=false | .night=false | .intensity=1.0 | .wind=0.15' ;;
+  drizzle)
+    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=false | .day=false | .night=true | .intensity=0.45 | .wind=0.05' ;;
+  storm)
+    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=true | .day=false | .night=true | .intensity=1.5 | .wind=0.55' ;;
+  sunshower)
+    write_state '.followSun=false | .followWeather=false | .rain=true | .thunder=false | .day=true | .night=false | .intensity=0.7 | .wind=0.1' ;;
+  noon | sunshine)
+    write_state '.followSun=false | .followWeather=false | .rain=false | .day=true | .night=false | .intensity=1.0 | .wind=0' ;;
+  goldenhour | golden)
+    write_state '.followSun=false | .followWeather=false | .rain=false | .day=true | .night=true | .intensity=0.8 | .wind=0' ;;
+  noir | midnight)
+    write_state '.followSun=false | .followWeather=false | .rain=false | .day=false | .night=true | .intensity=1.0 | .wind=0' ;;
+  *) return 1 ;;
+  esac
+  return 0
+}
+
+PRESETS=(clear storm drizzle shower sunshower sunshine goldenhour noir)
+
+# --------------------------------------------------------------------- help
+
+usage() {
+  cat <<'USAGE'
+wallpaper-weather -- weather for the Osaka Jade Custom wallpaper
+
+  wallpaper-weather                       show current state
+  wallpaper-weather status [--json]
+
+Moods (independent toggles -- they stack):
+  wallpaper-weather rain [on|off|toggle]  󰖗  rain, mist, splashes, lightning
+  wallpaper-weather day  [on|off|toggle]  󰖙  sunlight, god rays, dust motes
+  wallpaper-weather night [on|off|toggle] 󰖔  stars, moonlight, fireflies
+  wallpaper-weather thunder [on|off|toggle]  lightning; needs rain to show
+  wallpaper-weather mood <r> <d> <n>      set all three at once
+  wallpaper-weather clear                 all moods off
+  wallpaper-weather cycle                 step through the good combinations
+
+Presets:
+  storm  drizzle  shower  sunshower  sunshine  goldenhour  noir  clear
+
+Dials:
+  wallpaper-weather intensity <0.2-2.0|+0.1|-0.1>
+  wallpaper-weather wind <-1..1|+0.1|-0.1>
+  wallpaper-weather drift|parallax|grain|enabled [on|off|toggle]
+
+Placement (fractions of the screen, for wallpapers other than the jade city):
+  wallpaper-weather sky                   show current placement
+  wallpaper-weather sky sun <x> <y> [size]
+  wallpaper-weather sky moon <x> <y> [size]
+  wallpaper-weather sky horizon <0..1>    where the sky ends and stars stop
+  wallpaper-weather sky skyLeft <0..1>    stars fade in past foreground objects
+  wallpaper-weather sky groundLevel <0..1> top of the near foreground
+  wallpaper-weather sky auto          measure this wallpaper and fit to it
+  wallpaper-weather sky recall        re-apply this wallpaper's saved placement
+  wallpaper-weather sky forget        drop this wallpaper's saved placement
+  wallpaper-weather sky reset
+
+Automatic (persistent modes -- they keep tracking until switched off):
+  wallpaper-weather follow-sun [on|off]      day/night follows local sunrise/sunset
+  wallpaper-weather follow-weather [on|off]  mirror the real weather outside
+  wallpaper-weather auto                     one-shot: day or night from the sun
+  wallpaper-weather sync                     one-shot: match the weather now
+
+  Toggling a mood by hand releases the mode that owns it.
+
+Other:
+  wallpaper-weather menu                  open the Omarchy weather submenu
+  wallpaper-weather edit                  open the state file in $EDITOR
+  wallpaper-weather reset                 back to defaults
+
+State: ~/.local/state/omarchy/wallpaper-weather.json
+USAGE
+}
+
+# --------------------------------------------------------------------- main
+
+cmd="${1:-status}"
+[[ $# -gt 0 ]] && shift || true
+
+case "$cmd" in
+status | "")
+  if [[ ${1:-} == --json ]]; then read_state; else status_human; fi
+  ;;
+
+-h | --help | help)
+  usage
+  ;;
+
+rain | day | night | thunder)
+  value=$(resolve_bool "$cmd" "${1:-toggle}")
+  case "$cmd" in
+  rain | thunder) write_state ".$cmd = $value | .followWeather = false" ;;
+  day | night) write_state ".$cmd = $value | .followSun = false" ;;
+  esac
+  ;;
+
+follow-sun | followsun)
+  value=$(resolve_bool followSun "${1:-toggle}")
+  write_state ".followSun = $value"
+  [[ $value == true ]] && apply_follow_sun
+  ;;
+
+follow-weather | followweather)
+  value=$(resolve_bool followWeather "${1:-toggle}")
+  write_state ".followWeather = $value"
+  [[ $value == true ]] && apply_follow_weather
+  ;;
+
+# Called on a timer by the shell plugin. Does nothing unless a mode is on, so
+# the timer can run unconditionally and stay cheap.
+tick)
+  if [[ $(get followWeather) == true ]]; then
+    apply_follow_weather
+  elif [[ $(get followSun) == true ]]; then
+    apply_follow_sun
+  fi
+  ;;
+
+enabled | drift | parallax | grain)
+  value=$(resolve_bool "$cmd" "${1:-toggle}")
+  write_state ".$cmd = $value"
+  ;;
+
+intensity)
+  value=$(resolve_number intensity "${1:-}" 0.2 2.0)
+  write_state ".intensity = $value"
+  ;;
+
+wind)
+  value=$(resolve_number wind "${1:-}" -1 1)
+  write_state ".wind = $value"
+  ;;
+
+sky)
+  sky_set "$@"
+  ;;
+
+mood)
+  (( $# == 3 )) || die "usage: wallpaper-weather mood <rain> <day> <night>"
+  r=$(resolve_bool rain "$1"); d=$(resolve_bool day "$2"); n=$(resolve_bool night "$3")
+  write_state ".rain=$r | .day=$d | .night=$n"
+  ;;
+
+cycle)
+  # Ordered so the transitions read as a day passing, then weather rolling in.
+  case "$(get rain)$(get day)$(get night)" in
+  falsefalsefalse) apply_preset sunshine ;;
+  falsetruefalse) apply_preset goldenhour ;;
+  falsetruetrue) apply_preset noir ;;
+  falsefalsetrue) apply_preset storm ;;
+  truefalsetrue) apply_preset drizzle ;;
+  *) apply_preset clear ;;
+  esac
+  ;;
+
+auto)
+  if is_daytime "$(fetch_wttr 2>/dev/null || true)"; then
+    write_state '.day=true | .night=false'
+  else
+    write_state '.day=false | .night=true'
+  fi
+  ;;
+
+sync)
+  report=$(fetch_wttr) || die "could not reach wttr.in and no cached report"
+  code=$(jq -r '.current_condition[0].weatherCode // "113"' <<<"$report")
+  gust=$(jq -r '.current_condition[0].WindGustKmph // .current_condition[0].windspeedKmph // "0"' <<<"$report")
+
+  # WWO codes: everything at or above 176 is precipitation of some kind.
+  # 386+ are the thundery ones, which deserve the heavier preset.
+  wet=false; heavy=false
+  case "$code" in
+  176 | 179 | 182 | 185 | 200 | 263 | 266 | 281 | 284 | 293 | 296 | 299 | 302 | 305 | 308 | 311 | 314 | 317 | 320 | 323 | 326 | 329 | 332 | 335 | 338 | 350 | 353 | 356 | 359 | 362 | 365 | 368 | 371 | 374 | 377 | 386 | 389 | 392 | 395)
+    wet=true ;;
+  esac
+  case "$code" in 200 | 386 | 389 | 392 | 395) heavy=true ;; esac
+
+  if is_daytime "$report"; then daylight=true; else daylight=false; fi
+  # Gusts up to ~60km/h map onto the full wind range.
+  windv=$(awk -v g="$gust" 'BEGIN{ v=g/60; if (v>1) v=1; printf "%.2f", v }')
+  intens=1.0
+  [[ $heavy == true ]] && intens=1.5
+
+  write_state ".rain=$wet | .thunder=$heavy | .day=$daylight | .night=$([[ $daylight == true ]] && echo false || echo true) | .wind=$windv | .intensity=$intens"
+  ;;
+
+reset)
+  ensure_state
+  printf '%s\n' "$DEFAULTS" >"$STATE"
+  omarchy-shell -q wallpaper-weather reload 2>/dev/null || true
+  ;;
+
+menu)
+  omarchy-menu summon weather >/dev/null 2>&1 || omarchy-menu >/dev/null 2>&1 &
+  ;;
+
+edit)
+  ensure_state
+  "${EDITOR:-nvim}" "$STATE"
+  omarchy-shell -q wallpaper-weather reload 2>/dev/null || true
+  ;;
+
+path)
+  echo "$STATE"
+  ;;
+
+*)
+  apply_preset "$cmd" || die "unknown command '$cmd' (try: wallpaper-weather --help)"
+  ;;
+esac

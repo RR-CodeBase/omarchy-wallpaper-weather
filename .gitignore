@@ -1,0 +1,5 @@
+# Nothing generated lives here — assets/*.png are committed on purpose so the
+# plugin works without a Python run at install time.
+*.tmp
+*.bak
+.stash/
