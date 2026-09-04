@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.rr-codebase.wallpaper-weather",
   "name": "Wallpaper Weather",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Ruan Roos",
   "description": "Live weather for your wallpaper: rain, sunshine and night as independent toggles, drawn over the desktop background",
   "kinds": [
