@@ -134,13 +134,30 @@ Two settings that keep tracking rather than firing once:
 
 ```bash
 wallpaper-weather follow-sun on       # day/night follows local sunrise and sunset
-wallpaper-weather follow-weather on   # mirror the weather outside (wttr.in)
+wallpaper-weather follow-weather on   # mirror the weather outside
+wallpaper-weather power-save off      # keep animating behind windows
 ```
 
 They check every five minutes and compose: `follow-sun` owns day and night,
-`follow-weather` owns rain, thunder, wind and intensity. **Toggling a mood by
-hand releases whichever mode owns it**, so a manual change is never silently
-undone on the next tick.
+`follow-weather` owns rain, thunder, fog, wind and intensity — and day/night
+too, when `follow-sun` is off. **Toggling a mood by hand releases whichever
+mode owns it**, so a manual change is never silently undone on the next tick.
+
+Conditions come from [open-meteo](https://open-meteo.com), which is the same
+source Omarchy's own weather widget reads, so the wallpaper and the bar agree
+on what the sky is doing. [wttr.in](https://wttr.in) stands in when open-meteo
+is unreachable. Both are read at the coordinates the Omarchy weather widget is
+already configured with — set the location there once and this follows it.
+Replies are cached for fifteen minutes, so the five-minute tick is nearly
+always free.
+
+`wallpaper-weather sync` prints what it matched, which is the quickest way to
+see why a mood did or did not come on:
+
+```
+$ wallpaper-weather sync
+matched Drizzle (open-meteo 53) -- rain true, thunder false, fog false, intensity 0.80, wind 0.74
+```
 
 One-shot equivalents remain if you want the result without the tracking:
 `wallpaper-weather auto` and `wallpaper-weather sync`.
@@ -181,7 +198,7 @@ network panels are:
   They are independent and stack, so switches rather than a radio group
 * **intensity** and **wind** sliders
 * **Automatic** — switches for the two tracking modes, follow the sun and match
-  real weather
+  real weather, and **Rest when covered** (see [What it costs](#what-it-costs))
 * **Presets** — buttons for whole combinations: clear, rain, storm, golden
   hour, night
 
@@ -202,6 +219,49 @@ it hot-reloads on save. The panel can also be summoned without the bar:
 ```bash
 omarchy-shell io.github.rr-codebase.wallpaper-weather toggle
 ```
+
+## What it costs
+
+An animated wallpaper is redrawn and recomposited whether or not anything is in
+front of it, so the guiding rule here is to change as little as possible, as
+rarely as possible, and nothing at all when nobody is looking.
+
+Measured on this machine as CPU of one core, shell plus compositor, at 60Hz:
+
+| | before | now | covered |
+|---|---|---|---|
+| drift and grain, no mood | 44% | **10%** | **3%** |
+| night | 56% | **23%** | **3%** |
+| sunshine | 49% | **25%** | **3%** |
+| rain | 48% | **47%** | **4%** |
+
+Three things get it there.
+
+**One slow clock instead of many fast ones.** The drift crosses 61px in 112
+seconds — a hundredth of a pixel per frame. Animating that with a
+`NumberAnimation` marked the whole wallpaper dirty sixty times a second to move
+it by less than a pixel could show. Everything that moves at the speed of
+weather — the drift, the breathing grade, the star twinkle, the god rays, the
+mist, the grain — is now a binding on one shared 10Hz tick. Sharing it matters
+as much as slowing it: two ticks that are not in step dirty the screen twice as
+often as one.
+
+**Fireflies and dust motes are drawn, not simulated.** A `ParticleSystem` steps
+its whole simulation every frame no matter how little is happening — it cost
+the same at intensity 0, emitting nothing, as at full. Sixty specks crossing a
+rooftop at 5px a second do not need that, so they follow the clock like
+everything else. Rain still gets a real particle system, because falling rain
+genuinely needs every frame; it is the one mood that still costs what it looks
+like it costs.
+
+**Rest when covered.** Hyprland knows what is on each monitor's active
+workspace. When every one of them has a window on it, the clock stops, the rain
+stops, and the layer costs nothing until you can see it again. Anything unknown
+counts as visible, so an unrecognised setup keeps animating rather than
+freezing in your face. Switch it off with `wallpaper-weather power-save off`
+or the **Rest when covered** switch in the panel if you would rather it always
+ran — for instance if your gaps are wide enough that the wallpaper is never
+really hidden.
 
 ## Omarchy menu
 
@@ -336,7 +396,7 @@ Omarchy 4.x (Quattro), with its Quickshell-based shell.
 | `jq` | required — the CLI reads and writes its state with it |
 | `python3` | required for `sky auto` — the wallpaper detector is a stdlib-only script |
 | ImageMagick (`magick`) | required for `sky auto` — it samples the wallpaper |
-| `curl` | only for `wallpaper-weather sync` and `follow-weather` |
+| `curl` | only for `wallpaper-weather sync` and `follow-weather` — no network access happens unless you turn one of those on |
 
 Everything else is already there: `QtQuick.Particles`, `QtQuick.Effects` and
 `QtQuick.Shapes` ship with `qt6-declarative`.

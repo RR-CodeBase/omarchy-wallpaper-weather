@@ -28,6 +28,13 @@ Item {
   readonly property real wind: st ? st.wind : 0.0
   readonly property bool grainOn: st ? (st.fxEnabled && st.grain) : false
 
+  // The shared low-rate clock, in seconds. Everything on this layer that moves
+  // slowly enough to not need a frame of its own is a binding on it rather
+  // than an animation of its own -- see WeatherState for why. It stops when
+  // the desktop is covered, which freezes all of them at once.
+  readonly property real clock: st ? st.slowClock : 0
+  readonly property bool awake: st ? st.desktopVisible : true
+
   // Sky placement, as fractions of this panel. See WeatherState for what each
   // one means; every layer below derives its geometry from these rather than
   // from constants tuned to one photograph.
@@ -57,26 +64,15 @@ Item {
 
   clip: true
 
-  // Each mood's particle system keeps running for one particle lifetime after
-  // the mood is switched off, so the last drops fall out of frame instead of
-  // freezing mid-air. See the ParticleSystem blocks below.
+  // Rain keeps its system running for one particle lifetime after the mood is
+  // switched off, so the last drops fall out of frame instead of freezing
+  // mid-air -- stopping a ParticleSystem freezes its final frame rather than
+  // clearing it. The fireflies and motes need none of this: they fade on their
+  // own opacity and are gone when it reaches zero.
   property bool rainRunning: false
-  property bool flyRunning: false
-  property bool dustRunning: false
-
   onRainOnChanged: if (rainOn) { rainTail.stop(); rainRunning = true } else rainTail.restart()
-  onNightOnChanged: if (nightOn) { flyTail.stop(); flyRunning = true } else flyTail.restart()
-  onDayOnChanged: if (dayOn) { dustTail.stop(); dustRunning = true } else dustTail.restart()
-
   Timer { id: rainTail; interval: 3200; onTriggered: if (!fx.rainOn) fx.rainRunning = false }
-  Timer { id: flyTail; interval: 4000; onTriggered: if (!fx.nightOn) fx.flyRunning = false }
-  Timer { id: dustTail; interval: 4000; onTriggered: if (!fx.dayOn) fx.dustRunning = false }
-
-  Component.onCompleted: {
-    rainRunning = rainOn
-    flyRunning = nightOn
-    dustRunning = dayOn
-  }
+  Component.onCompleted: rainRunning = rainOn
 
   // ------------------------------------------------------------------ sky --
   // Directional light the uniform colour grade can't express: warm from above
@@ -166,13 +162,8 @@ Item {
       Behavior on opacity { NumberAnimation { duration: 1100 } }
     }
 
-    property real pulse: 0
-    SequentialAnimation on pulse {
-      running: luminary.visible
-      loops: Animation.Infinite
-      NumberAnimation { to: 0.05; duration: 5200; easing.type: Easing.InOutSine }
-      NumberAnimation { to: 0.00; duration: 6100; easing.type: Easing.InOutSine }
-    }
+    readonly property real pulse:
+      visible ? 0.025 + 0.025 * Math.sin(fx.clock * 0.5560) : 0
   }
 
   // ------------------------------------------------------------- god rays --
@@ -194,13 +185,7 @@ Item {
       brightness: 0.1
     }
 
-    property real sway: 0
-    SequentialAnimation on sway {
-      running: rays.visible
-      loops: Animation.Infinite
-      NumberAnimation { to: 1; duration: 21000; easing.type: Easing.InOutSine }
-      NumberAnimation { to: -1; duration: 24000; easing.type: Easing.InOutSine }
-    }
+    readonly property real sway: visible ? Math.sin(fx.clock * 0.1396) : 0
 
     Item {
       id: rayOrigin
@@ -221,13 +206,10 @@ Item {
           y: 0
           transformOrigin: Item.Top
           rotation: -34 + index * 11.5 + rays.sway * 2.4
-          opacity: 0.30 + 0.22 * Math.abs(Math.sin(index * 1.7))
-          SequentialAnimation on opacity {
-            running: rays.visible
-            loops: Animation.Infinite
-            NumberAnimation { to: 0.16; duration: 5200 + index * 900; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.50; duration: 6100 + index * 700; easing.type: Easing.InOutSine }
-          }
+          readonly property real beat: 6.2832 / (11.3 + index * 1.6)
+          opacity: rays.visible
+            ? 0.33 + 0.17 * Math.sin(fx.clock * beat + index * 1.7)
+            : 0
         }
       }
     }
@@ -270,14 +252,16 @@ Item {
           Math.max(0, 1 - py * py * 1.15) *
           Math.min(1, Math.max(0, (px - fx.skyLeft) / 0.20))
 
-        opacity: 0
-        SequentialAnimation on opacity {
-          running: stars.visible
-          loops: Animation.Infinite
-          PauseAnimation { duration: Math.round(stars.rnd(index, 4) * 5200) }
-          NumberAnimation { to: 0.85 * reach * (0.35 + mag * 0.65); duration: 1400 + Math.round(mag * 2600); easing.type: Easing.InOutSine }
-          NumberAnimation { to: 0.12 * reach; duration: 1800 + Math.round(stars.rnd(index, 5) * 3400); easing.type: Easing.InOutSine }
-        }
+        // Ninety stars used to be ninety infinite animations, each waking the
+        // scene graph every frame to move an opacity by a thousandth. They are
+        // now ninety bindings on one clock, sampled together.
+        readonly property real hi: 0.85 * reach * (0.35 + mag * 0.65)
+        readonly property real lo: 0.12 * reach
+        readonly property real beat:
+          6.2832 / (3.2 + mag * 2.6 + stars.rnd(index, 5) * 3.4)
+        opacity: stars.visible
+          ? lo + (hi - lo) * (0.5 + 0.5 * Math.sin(fx.clock * beat + stars.rnd(index, 4) * 6.2832))
+          : 0
       }
     }
   }
@@ -315,12 +299,7 @@ Item {
       y: fx.height * fx.mistY
       opacity: fx.fogOn ? 0.34 : 0.15
       Behavior on opacity { NumberAnimation { duration: 1400 } }
-      x: -tile
-      NumberAnimation on x {
-        running: mist.visible
-        loops: Animation.Infinite
-        from: -mistFar.tile; to: 0; duration: 96000
-      }
+      x: -tile + tile * ((fx.clock % 96) / 96)
     }
 
     // near band -- lower, larger, drifts left, so the two shear against each other
@@ -344,19 +323,18 @@ Item {
       y: fx.height * (fx.groundLevel + (1 - fx.groundLevel) * 0.17)
       opacity: fx.fogOn ? 0.26 : 0.11
       Behavior on opacity { NumberAnimation { duration: 1400 } }
-      x: 0
-      NumberAnimation on x {
-        running: mist.visible
-        loops: Animation.Infinite
-        from: 0; to: -mistNear.tile; duration: 141000
-      }
+      x: -tile * ((fx.clock % 141) / 141)
     }
   }
 
   // ------------------------------------------------------------------ rain --
   ParticleSystem {
     id: rainSys
-    running: fx.rainRunning
+    // `paused` stops the simulation but not the frame requests -- with the
+    // desktop covered it measured no cheaper than running. Stopping it does,
+    // and the curtain refills in under a second (a drop lives 2.6s and clears
+    // the screen in half that), so nothing is visibly missing coming back.
+    running: fx.rainRunning && fx.awake
     anchors.fill: parent
   }
 
@@ -507,7 +485,7 @@ Item {
     }
 
     Timer {
-      running: storm.visible
+      running: storm.visible && fx.awake
       // Poisson-ish: re-roll the gap after every strike so it never feels metronomic.
       interval: 9000 + Math.round(Math.random() * 34000)
       repeat: true
@@ -521,89 +499,123 @@ Item {
   // ------------------------------------------------------------ fireflies --
   // Jade spirits over the rooftops. Sparse and slow on purpose -- these are
   // the thing you notice on the third glance, not the first.
-  ParticleSystem {
-    id: flySys
-    running: fx.flyRunning
+  //
+  // Drawn rather than simulated. A ParticleSystem steps its whole simulation
+  // on every frame whether or not anything is moving far, and measured at
+  // ~20% CPU here to carry sixty specks across a rooftop at 5px a second --
+  // the same cost at intensity 0, when it emits nothing at all. These follow
+  // the shared clock instead: each speck owns a deterministic loop of
+  // position and fade, so the flight is reproducible, the seam is hidden at
+  // zero opacity, and nothing is computed between ticks.
+  Item {
+    id: flies
     anchors.fill: parent
-  }
-
-  Emitter {
-    system: flySys
-    enabled: fx.nightOn
-    x: 0
-    y: fx.height * fx.groundLevel
-    width: fx.width
-    height: fx.height * (1 - fx.groundLevel)
-    emitRate: Math.max(1, Math.round(5 * fx.amount))
-    lifeSpan: 13000
-    lifeSpanVariation: 4000
-    size: 5
-    sizeVariation: 4
-    endSize: 2
-    velocity: AngleDirection { angleVariation: 180; magnitude: 5; magnitudeVariation: 5 }
-  }
-
-  Wander {
-    system: flySys
-    enabled: fx.nightOn
-    anchors.fill: parent
-    xVariance: 46
-    yVariance: 34
-    pace: 22
-  }
-
-  ImageParticle {
-    system: flySys
-    source: Qt.resolvedUrl("assets/glow.png")
-    opacity: fx.nightOn ? 1 : 0
     visible: opacity > 0.001
+    opacity: fx.nightOn ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 3400; easing.type: Easing.InOutCubic } }
-    color: fx.sparkColor
-    colorVariation: 0.35
-    alpha: 0.70
-    alphaVariation: 0.30
-    entryEffect: ImageParticle.Fade
+
+    function rnd(i, salt) {
+      var v = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453
+      return v - Math.floor(v)
+    }
+
+    readonly property real bandY: fx.height * fx.groundLevel
+    readonly property real bandH: fx.height * (1 - fx.groundLevel)
+
+    Repeater {
+      model: flies.visible ? Math.max(6, Math.round(64 * fx.amount)) : 0
+      Image {
+        required property int index
+
+        // One life: fade up, wander, fade down, begin again elsewhere.
+        readonly property real span: 11 + flies.rnd(index, 6) * 6
+        readonly property real u: {
+          var t = fx.clock + flies.rnd(index, 7) * span
+          return (t % span) / span
+        }
+        // Re-seed the resting place once per life, so a speck does not return
+        // to the same spot every time it lights up.
+        readonly property int life: Math.floor((fx.clock + flies.rnd(index, 7) * span) / span)
+        readonly property real px: flies.rnd(index + life * 37, 1)
+        readonly property real py: flies.rnd(index + life * 37, 2)
+
+        source: Qt.resolvedUrl("assets/glow.png")
+        smooth: true
+        width: 5 + flies.rnd(index, 3) * 8
+        height: width
+
+        x: px * fx.width
+           + 46 * Math.sin(fx.clock * (0.42 + flies.rnd(index, 4) * 0.38) + index)
+           - width / 2
+        y: flies.bandY + py * flies.bandH
+           + 34 * Math.sin(fx.clock * (0.31 + flies.rnd(index, 5) * 0.29) + index * 1.7)
+           - u * 34
+           - height / 2
+
+        opacity: Math.sin(Math.PI * u) * (0.55 + flies.rnd(index, 8) * 0.45)
+      }
+    }
+
+    // The theme accent, so the spirits belong to whatever palette is set.
+    layer.enabled: flies.visible && width > 0 && height > 0
+    layer.effect: MultiEffect {
+      colorization: 1.0
+      colorizationColor: fx.sparkColor
+    }
   }
 
   // ------------------------------------------------------------ dust motes --
-  ParticleSystem {
-    id: dustSys
-    running: fx.dustRunning
+  // Sunlit dust, on the same clock and for the same reason as the fireflies.
+  Item {
+    id: motes
     anchors.fill: parent
-  }
-
-  Emitter {
-    system: dustSys
-    enabled: fx.dayOn
-    anchors.fill: parent
-    emitRate: Math.max(1, Math.round(24 * fx.amount))
-    lifeSpan: 15000
-    lifeSpanVariation: 5000
-    size: 3
-    sizeVariation: 4
-    velocity: AngleDirection { angle: 268; angleVariation: 42; magnitude: 11; magnitudeVariation: 8 }
-  }
-
-  Wander {
-    system: dustSys
-    enabled: fx.dayOn
-    anchors.fill: parent
-    xVariance: 34
-    yVariance: 18
-    pace: 12
-  }
-
-  ImageParticle {
-    system: dustSys
-    source: Qt.resolvedUrl("assets/glow.png")
-    opacity: fx.dayOn ? 1 : 0
     visible: opacity > 0.001
+    opacity: fx.dayOn ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 3400; easing.type: Easing.InOutCubic } }
-    color: fx.moteColor
-    colorVariation: 0.2
-    alpha: 0.40
-    alphaVariation: 0.20
-    entryEffect: ImageParticle.Fade
+
+    function rnd(i, salt) {
+      var v = Math.sin(i * 269.5 + salt * 183.3) * 43758.5453
+      return v - Math.floor(v)
+    }
+
+    Repeater {
+      model: motes.visible ? Math.max(12, Math.round(150 * fx.amount)) : 0
+      Image {
+        required property int index
+
+        readonly property real span: 13 + motes.rnd(index, 6) * 5
+        readonly property real u: {
+          var t = fx.clock + motes.rnd(index, 7) * span
+          return (t % span) / span
+        }
+        readonly property int life: Math.floor((fx.clock + motes.rnd(index, 7) * span) / span)
+        readonly property real px: motes.rnd(index + life * 53, 1)
+        readonly property real py: motes.rnd(index + life * 53, 2)
+
+        source: Qt.resolvedUrl("assets/glow.png")
+        smooth: true
+        width: 3 + motes.rnd(index, 3) * 5
+        height: width
+
+        // Up and slightly left, the way the emitter used to throw them.
+        x: px * fx.width
+           + 34 * Math.sin(fx.clock * (0.24 + motes.rnd(index, 4) * 0.2) + index)
+           - u * 22
+           - width / 2
+        y: py * fx.height
+           + 18 * Math.sin(fx.clock * (0.19 + motes.rnd(index, 5) * 0.17) + index * 2.3)
+           - u * 165
+           - height / 2
+
+        opacity: Math.sin(Math.PI * u) * (0.30 + motes.rnd(index, 8) * 0.30)
+      }
+    }
+
+    layer.enabled: motes.visible && width > 0 && height > 0
+    layer.effect: MultiEffect {
+      colorization: 1.0
+      colorizationColor: fx.moteColor
+    }
   }
 
   // ------------------------------------------------------------ film grain --
@@ -617,16 +629,17 @@ Item {
     opacity: 0.030
 
     // Jitter the tile origin a few times a second so the grain crawls the way
-    // film does instead of sitting there like a texture.
-    Timer {
-      running: grain.visible
-      interval: 90
-      repeat: true
-      onTriggered: {
-        grain.x = -Math.round(Math.random() * 127)
-        grain.y = -Math.round(Math.random() * 127)
-      }
+    // film does instead of sitting there like a texture -- on the shared clock
+    // rather than a timer of its own. Two ticks that are not in step dirty the
+    // screen twice as often as one: grain and drift each cost ~8 points alone
+    // and ~14 together, which is the whole of the difference.
+    readonly property int step: Math.floor(fx.clock * 10)
+    function jitter(salt) {
+      var v = Math.sin(step * 12.9898 + salt * 78.233) * 43758.5453
+      return -Math.round((v - Math.floor(v)) * 127)
     }
+    x: jitter(1)
+    y: jitter(2)
   }
 
   // -------------------------------------------------------------- vignette --

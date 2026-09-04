@@ -44,6 +44,7 @@ Panel {
   property bool fog: false
   property bool followSun: false
   property bool followWeather: false
+  property bool powerSave: true
 
   readonly property bool anyMood: fxEnabled && (rain || day || night)
 
@@ -113,6 +114,7 @@ Panel {
         root.fog = cfg.fog === true
         root.followSun = cfg.followSun === true
         root.followWeather = cfg.followWeather === true
+        root.powerSave = cfg.powerSave !== false
       } catch (error) {
         // A half-written file is transient; keep the last good state.
       }
@@ -275,7 +277,9 @@ Panel {
             { cmd: "follow-sun", prop: "followSun", glyph: "󰖜",
               label: "Follow the sun" },
             { cmd: "follow-weather", prop: "followWeather", glyph: "󰇧",
-              label: "Match real weather" }
+              label: "Match real weather" },
+            { cmd: "power-save", prop: "powerSave", glyph: "󰒲",
+              label: "Rest when covered" }
           ]
 
           Item {

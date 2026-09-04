@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 
 // Shared, screen-independent state for the weather FX layer.
 //
@@ -29,6 +30,7 @@ Item {
   property bool drift: true      // slow ken-burns push on the photo
   property bool parallax: true   // photo leans away from the pointer
   property bool grain: true
+  property bool powerSave: true  // stand still while the desktop is covered
 
   // Persistent automatic modes. The CLI owns what each one sets; this just
   // asks it to tick.
@@ -104,9 +106,12 @@ Item {
   Behavior on gradeColor { ColorAnimation { duration: 900; easing.type: Easing.InOutCubic } }
 
   // Held out of gradeBrightness so its slow oscillation doesn't restart the
-  // 900ms mood transition on every frame.
-  property real breathe: 0
-  readonly property real fxBrightness: gradeBrightness + (anyMood ? breathe : 0)
+  // 900ms mood transition on every frame. Sampled off the slow clock: it
+  // travels 0.028 of brightness in 9.3s, which is a 1/255 step every 1.3s --
+  // there is nothing for a 60Hz frame to show that a 160ms one doesn't.
+  readonly property real breathe:
+    anyMood ? 0.004 + 0.014 * Math.sin(slowClock * 0.6756) : 0
+  readonly property real fxBrightness: gradeBrightness + breathe
 
   // Stays true while the 900ms grade animation unwinds after the last mood is
   // switched off, so the offscreen layer is torn down at identity rather than
@@ -117,38 +122,73 @@ Item {
     || Math.abs(gradeSaturation) > 0.002
     || gradeColorization > 0.002
 
-  SequentialAnimation on breathe {
-    running: state.anyMood
-    loops: Animation.Infinite
-    NumberAnimation { to: 0.018; duration: 4200; easing.type: Easing.InOutSine }
-    NumberAnimation { to: -0.010; duration: 5100; easing.type: Easing.InOutSine }
+  // --- the slow clock -----------------------------------------------------
+  // Everything here moves at the speed of weather, not of a frame. The drift
+  // crosses 61px in 112s -- 0.009px per frame at 60Hz -- so animating it with
+  // a NumberAnimation marked the whole wallpaper dirty sixty times a second to
+  // move it by a hundredth of a pixel, and cost ~22% CPU in the shell plus
+  // ~11% in the compositor to do it. One shared 100ms tick drives all of it
+  // instead, at a step of ~0.06px: below what a pixel can show, and a sixth of
+  // the wakeups.
+  //
+  // The clock is elapsed seconds, read from the wall clock rather than
+  // accumulated, so pausing and resuming it never puts a seam in the motion.
+  readonly property int slowTickMs: 100
+  property real slowEpoch: Date.now() / 1000
+  property real slowClock: 0
+  readonly property bool slowClockNeeded:
+    fxEnabled && (drifting || anyMood || grading || grain) && desktopVisible
+
+  // --- is anyone looking? -------------------------------------------------
+  // An animated wallpaper costs the same whether or not there is a window in
+  // front of it: the surface is redrawn and the compositor recomposites it
+  // either way. So ask Hyprland what is on each monitor's active workspace and
+  // stand still while every one of them is covered -- which, on a machine
+  // being worked on, is most of the day.
+  //
+  // Read off workspaces rather than monitors: Hyprland.monitors populates
+  // without its activeWorkspace links attached, so a monitor-first version of
+  // this test silently answered "visible" forever. Each workspace knows both
+  // whether it is the active one on its monitor and what is on it.
+  //
+  // Anything unknown counts as visible. A wrong "nobody is looking" freezes
+  // the wallpaper in someone's face; a wrong "someone is looking" only costs
+  // what the plugin used to cost anyway.
+  function anyBareDesktop(workspaces) {
+    var sawActive = false
+    for (var i = 0; i < workspaces.length; ++i) {
+      var w = workspaces[i]
+      if (!w || !w.active) continue
+      sawActive = true
+      if (!w.toplevels || w.toplevels.values.length === 0) return true
+    }
+    return !sawActive
+  }
+
+  readonly property bool desktopVisible:
+    !powerSave || anyBareDesktop(Hyprland.workspaces.values)
+
+  // The models are lazily populated, and nothing else here would ask.
+  Component.onCompleted: {
+    Hyprland.refreshWorkspaces()
+    Hyprland.refreshToplevels()
+  }
+
+  Timer {
+    interval: state.slowTickMs
+    repeat: true
+    running: state.slowClockNeeded
+    triggeredOnStart: true
+    onTriggered: state.slowClock = Date.now() / 1000 - state.slowEpoch
   }
 
   // --- drift --------------------------------------------------------------
   // Three incommensurable periods so the framing never visibly repeats.
   readonly property bool drifting: fxEnabled && drift
-  property real driftX: 0
-  property real driftY: 0
-  property real driftZoom: 0
+  readonly property real driftX: drifting ? Math.sin(slowClock * 0.0280500) : 0
+  readonly property real driftY: drifting ? 0.7 * Math.sin(slowClock * 0.0361111 + 1.3) : 0
+  readonly property real driftZoom: drifting ? 0.5 + 0.5 * Math.sin(slowClock * 0.0219690 + 2.1) : 0
 
-  SequentialAnimation on driftX {
-    running: state.drifting
-    loops: Animation.Infinite
-    NumberAnimation { from: -1; to: 1; duration: 112000; easing.type: Easing.InOutSine }
-    NumberAnimation { from: 1; to: -1; duration: 112000; easing.type: Easing.InOutSine }
-  }
-  SequentialAnimation on driftY {
-    running: state.drifting
-    loops: Animation.Infinite
-    NumberAnimation { from: 0.7; to: -0.7; duration: 87000; easing.type: Easing.InOutSine }
-    NumberAnimation { from: -0.7; to: 0.7; duration: 87000; easing.type: Easing.InOutSine }
-  }
-  SequentialAnimation on driftZoom {
-    running: state.drifting
-    loops: Animation.Infinite
-    NumberAnimation { from: 0; to: 1; duration: 143000; easing.type: Easing.InOutSine }
-    NumberAnimation { from: 1; to: 0; duration: 143000; easing.type: Easing.InOutSine }
-  }
 
   // --- automatic modes ----------------------------------------------------
   readonly property string cliPath:
@@ -244,6 +284,7 @@ Item {
     drift = bool_(cfg.drift, true)
     parallax = bool_(cfg.parallax, true)
     grain = bool_(cfg.grain, true)
+    powerSave = bool_(cfg.powerSave, true)
     followSun = bool_(cfg.followSun, false)
     followWeather = bool_(cfg.followWeather, false)
     intensity = num_(cfg.intensity, 1.0)
@@ -268,6 +309,7 @@ Item {
     return JSON.stringify({
       enabled: true, rain: false, day: false, night: true, thunder: false, fog: false,
       intensity: 1.0, wind: 0.0, drift: true, parallax: true, grain: true,
+      powerSave: true,
       followSun: false, followWeather: false,
       sky: {
         sunX: 0.60, sunY: 0.14, sunSize: 0.95,
@@ -310,7 +352,8 @@ Item {
         enabled: state.fxEnabled, rain: state.rain, day: state.day, night: state.night,
         thunder: state.thunder, fog: state.fog,
         intensity: state.intensity, wind: state.wind,
-        drift: state.drift, parallax: state.parallax, grain: state.grain
+        drift: state.drift, parallax: state.parallax, grain: state.grain,
+        powerSave: state.powerSave, desktopVisible: state.desktopVisible
       })
     }
   }
